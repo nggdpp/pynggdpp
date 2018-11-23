@@ -1,24 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""
-This is a skeleton file that can serve as a starting point for a Python
-console script. To run this script uncomment the following lines in the
-[options.entry_points] section in setup.cfg:
-
-    console_scripts =
-         fibonacci = pynggdpp.skeleton:run
-
-Then run `python setup.py install` which will install the command `fibonacci`
-inside your current environment.
-Besides console scripts, the header (i.e. until _logger...) of this file can
-also be used as template for Python modules.
-
-Note: This skeleton file can be safely removed if not needed!
-"""
 
 import argparse
 import sys
 import logging
+import requests
 
 from pynggdpp import __version__
 
@@ -28,21 +14,34 @@ __license__ = "public-domain"
 
 _logger = logging.getLogger(__name__)
 
+sb_vocab_path = 'https://www.sciencebase.gov/vocab'
+sb_vocab_id_ndc = '5bf3f7bce4b00ce5fb627d57'
 
-def fib(n):
-    """Fibonacci example function
+sb_catalog_path = 'https://www.sciencebase.gov/catalog/items?format=json&max=1000'
+sb_ndc_id = '4f4e4760e4b07f02db47dfb4'
 
-    Args:
-      n (int): integer
+default_fields_collections = 'title,contacts,spatial,files,webLinks'
 
-    Returns:
-      int: n-th Fibonacci number
-    """
-    assert n > 0
-    a, b = 1, 1
-    for i in range(n-1):
-        a, b = b, a+b
-    return a
+
+def ndc_collection_type_tag(tag_name,include_type=True):
+    vocab_search_url = f'{sb_vocab_path}/{sb_vocab_id_ndc}/terms?nodeType=term&format=json&name={tag_name}'
+    r_vocab_search = requests.get(vocab_search_url).json()
+    if len(r_vocab_search['list']) == 1:
+        tag = {'name':r_vocab_search['list'][0]['name'],'scheme':r_vocab_search['list'][0]['scheme']}
+        if include_type:
+            tag['type'] = 'theme'
+        return tag
+    else:
+        return None
+
+
+def ndc_get_collections(parentId=sb_ndc_id, fields=default_fields_collections):
+    sb_query_collections = f'{sb_catalog_path}&' \
+                           f'fields={fields}&' \
+                           f'folderId={parentId}&' \
+                           f"filter=tags%3D{ndc_collection_type_tag('ndc_collection',False)}"
+    r_ndc_collections = requests.get(sb_query_collections).json()
+    return r_ndc_collections['items']
 
 
 def parse_args(args):
