@@ -10,6 +10,7 @@ from bs4 import BeautifulSoup
 import xmltodict
 from datetime import datetime
 from gis_metadata.iso_metadata_parser import IsoParser
+import pandas as pd
 
 
 from pynggdpp import __version__
@@ -37,7 +38,7 @@ def list_waf(url, ext='xml'):
     return [url + node.get('href') for node in soup.find_all('a') if node.get('href').endswith(ext)]
 
 
-def ndc_xml_to_geojson(file_url):
+def ndc_xml_to_geojson(collection_id, file_url):
     try:
         xmlData = requests.get(file_url).text
         dictData = xmltodict.parse(xmlData, dict_constructor=dict)
@@ -53,6 +54,7 @@ def ndc_xml_to_geojson(file_url):
         if sample_list is not None:
             feature_list = []
             for sample in sample_list:
+                sample['collection_id'] = collection_id
                 sample['source_file'] = file_url
                 sample['build_from_source_date'] = datetime.utcnow().isoformat()
                 pointGeometry = build_point_geometry(sample['coordinates'])
@@ -62,6 +64,22 @@ def ndc_xml_to_geojson(file_url):
 
     except Exception as e:
         return e
+
+
+def ndc_text_to_geojson(collection_id, file_url):
+    df_text_file = pd.read_csv(file_url, delimiter='|')
+
+    feature_list = []
+
+    for ind, row in df_text_file.fillna('').iterrows():
+        p = row.drop('Coordinates').to_dict()
+        p['collection_id'] = collection_id
+        p['source_file'] = file_url
+        p['build_from_source_date'] = datetime.utcnow().isoformat()
+        g = build_point_geometry(row['Coordinates'])
+        feature_list.append(build_ndc_feature(g, p))
+
+    return FeatureCollection(feature_list)
 
 
 def ndc_collection_from_waf(waf_url):
