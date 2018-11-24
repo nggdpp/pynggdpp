@@ -38,7 +38,7 @@ def list_waf(url, ext='xml'):
     return [url + node.get('href') for node in soup.find_all('a') if node.get('href').endswith(ext)]
 
 
-def ndc_xml_to_geojson(collection_id, file_url):
+def ndc_xml_to_geojson(collection_id, file_url, lowercase_property_keys=True):
     try:
         xmlData = requests.get(file_url).text
         dictData = xmltodict.parse(xmlData, dict_constructor=dict)
@@ -58,6 +58,8 @@ def ndc_xml_to_geojson(collection_id, file_url):
                 sample['source_file'] = file_url
                 sample['build_from_source_date'] = datetime.utcnow().isoformat()
                 pointGeometry = build_point_geometry(sample['coordinates'])
+                if lowercase_property_keys:
+                    sample = {k.lower(): v for k, v in sample.items()}
                 feature_list.append(build_ndc_feature(pointGeometry, sample))
 
             return FeatureCollection(feature_list)
@@ -66,17 +68,19 @@ def ndc_xml_to_geojson(collection_id, file_url):
         return e
 
 
-def ndc_text_to_geojson(collection_id, file_url):
+def ndc_text_to_geojson(collection_id, file_url, lowercase_property_keys=True):
     df_text_file = pd.read_csv(file_url, delimiter='|')
 
     feature_list = []
 
     for ind, row in df_text_file.fillna('').iterrows():
-        p = row.drop('Coordinates').to_dict()
+        p = row.to_dict()
         p['collection_id'] = collection_id
         p['source_file'] = file_url
         p['build_from_source_date'] = datetime.utcnow().isoformat()
         g = build_point_geometry(row['Coordinates'])
+        if lowercase_property_keys:
+            p = {k.lower(): v for k, v in p.items()}
         feature_list.append(build_ndc_feature(g, p))
 
     return FeatureCollection(feature_list)
