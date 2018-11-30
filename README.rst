@@ -2,14 +2,21 @@
 pynggdpp
 ========
 
-
-Add a short description here!
+This package provides a number of core functions associated with managing data for the National Digital Catalog of Geological and Geophysical Data.
 
 
 Description
 ===========
 
-A longer description of your project goes here...
+Modules for collection management and data processing:
+
+collection
+----------
+
+* 
+
+processing
+----------
 
 
 Note

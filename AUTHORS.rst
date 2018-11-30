@@ -2,4 +2,5 @@
 Contributors
 ============
 
-* sbristol@usgs.gov <sbristol@usgs.gov>
+* Sky Bristol <sbristol@usgs.gov>
+* Steve Richard

@@ -20,7 +20,7 @@ sb_vocab_id_ndc = '5bf3f7bce4b00ce5fb627d57'
 sb_catalog_path = 'https://www.sciencebase.gov/catalog/items?format=json&max=1000'
 sb_ndc_id = '4f4e4760e4b07f02db47dfb4'
 
-default_fields_collections = 'title,contacts,spatial,files,webLinks'
+default_fields_collections = 'title,body,contacts,spatial,files,webLinks,facets'
 
 
 def ndc_collection_type_tag(tag_name,include_type=True):
@@ -35,13 +35,43 @@ def ndc_collection_type_tag(tag_name,include_type=True):
         return None
 
 
-def ndc_get_collections(parentId=sb_ndc_id, fields=default_fields_collections):
+def ndc_get_collections(parentId=sb_ndc_id, fields=default_fields_collections, collection_id=None):
     sb_query_collections = f'{sb_catalog_path}&' \
                            f'fields={fields}&' \
                            f'folderId={parentId}&' \
                            f"filter=tags%3D{ndc_collection_type_tag('ndc_collection',False)}"
+    if collection_id is not None:
+        sb_query_collections = f"{sb_query_collections}&id={collection_id}"
     r_ndc_collections = requests.get(sb_query_collections).json()
     return r_ndc_collections['items']
+
+
+def collection_metadata_summary(collection=None, *collection_id):
+    if collection is None:
+        collection_record = ndc_get_collections(collection_id=collection_id)
+        if collection_record is None:
+            return {"Error": "Collection record could not be retrieved or is not a valid NDC collection"}
+
+        if len(collection_record) > 1:
+            return {"Error": "Query for collection returned more than one for some reason"}
+
+        collection_record = collection_record[0]
+    else:
+        collection_record = collection
+
+    metadata_summary = dict()
+    metadata_summary["Collection Title"] = collection_record["title"]
+    metadata_summary["Collection Link"] = collection_record["link"]["url"]
+
+    if "contacts" in collection_record.keys():
+        metadata_summary["Collection Owner"] = [c["name"] for c in collection_record["contacts"]
+                               if "type" in c.keys() and c["type"] == "Data Owner"]
+        if len(metadata_summary["Collection Owner"]) == 0:
+            metadata_summary["Collection Improvement Needed"] = "Need data owner contact in collection metadata"
+    else:
+        metadata_summary["Collection Improvement Needed"] = "Need contacts in collection metadata"
+
+    return metadata_summary
 
 
 def parse_args(args):
