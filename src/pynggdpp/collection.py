@@ -42,13 +42,15 @@ def ndc_get_collections(parentId=sb_ndc_id, fields=default_fields_collections, c
                            f"filter=tags%3D{ndc_collection_type_tag('ndc_collection',False)}"
     if collection_id is not None:
         sb_query_collections = f"{sb_query_collections}&id={collection_id}"
+
     r_ndc_collections = requests.get(sb_query_collections).json()
+
     return r_ndc_collections['items']
 
 
-def collection_metadata_summary(collection=None, *collection_id):
+def collection_metadata_summary(collection=None, collection_id=None):
     if collection is None:
-        collection_record = ndc_get_collections(collection_id=collection_id)
+        collection_record = ndc_get_collections(collection_id=collection_id, fields="title,contacts")
         if collection_record is None:
             return {"Error": "Collection record could not be retrieved or is not a valid NDC collection"}
 

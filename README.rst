@@ -2,25 +2,10 @@
 pynggdpp
 ========
 
-This package provides a number of core functions associated with managing data for the National Digital Catalog of Geological and Geophysical Data.
+This package provides a number of core functions associated with managing data for the National Digital Catalog (NDC) of Geological and Geophysical Data. It also serves as the focal point for documenting the underlying architecture of "NDC 2.0," a re-imagining of the platform for documenting and providing access to the Nation's treasure trove of physical geoscience data assets.
 
+Install the Python package with PIP:
 
-Description
-===========
+pip install git+https://github.com/nggdpp/pynggdpp.git
 
-Modules for collection management and data processing:
-
-collection
-----------
-
-* 
-
-processing
-----------
-
-
-Note
-====
-
-This project has been set up using PyScaffold 3.1. For details and usage
-information on PyScaffold see https://pyscaffold.org/.
+Read the docs.

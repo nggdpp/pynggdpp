@@ -1,0 +1,4 @@
+.. _collectionmetadata:
+
+Collection Metadata
+*******************
