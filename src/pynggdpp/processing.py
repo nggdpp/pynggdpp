@@ -5,16 +5,21 @@ import argparse
 import sys
 import logging
 import requests
-from geojson import Feature, Point, FeatureCollection
+from geojson import Feature, Point, Polygon, FeatureCollection
+from geojson import dumps as geojson_dumps
+from geojson_utils import centroid
 from bs4 import BeautifulSoup
 import xmltodict
 from datetime import datetime
-from gis_metadata.iso_metadata_parser import IsoParser
+import dateutil.parser as dt_parser
+from gis_metadata.metadata_parser import get_metadata_parser
 import json
 import os
 from pymongo import MongoClient
 import pandas as pd
 from pynggdpp import collection as ndcCollection
+import timeout_decorator
+import validators
 
 
 from pynggdpp import __version__
@@ -39,31 +44,74 @@ def build_ndc_feature(geom, props):
     return ndcFeature
 
 
-def list_waf(url, response=None, ext='xml'):
+def parse_waf(link_meta):
     """
-    Use BeautifulSoup to retrieve a web page listing of links for harvesting. Most web accessible folders present
-    themselves as an HTML response, making this a reasonable way of putting together a link listing.
+    Parses a Web Accessible Folder HTML response to build a data structure containing response header information and
+    a listing of potentially harvestable XML file URLs. This sets up a list of harvestable items for a given collection,
+    including the available date/time information that can be used to keep things in sync over time.
 
-    :param url: (str) The URL to the WAF, this is requested if a response object is not provided.
-    :param response: (HTTP response object from requests) An HTTP response provided from another function.
-    :param ext: (str) File extension to use in filtering the list of links.
-    :return: Returns a simple listing of URLs
-
-    Note: This is super simplistic at the moment, and I need to make it a more sophisticated function as we have
-    more types of harvestable places to parse.
+    :param link_meta: Web link object containing a URL and other properties from the ScienceBase Item schema
+    :return: Dictionary containing headers and url_list
     """
+    try:
+        if not isinstance(link_meta, dict):
+            raise Exception("Link metadata needs to be a dictionary object")
 
-    # Get the URL if needed
-    if response is None:
-        page = requests.get(url).text
-    else:
-        page = response.text
+        if not validators.url(link_meta["uri"]):
+            raise Exception(f"URL is not valid - {link_meta['uri']}")
 
-    # Parse the response text contents with the HTML parser
-    soup = BeautifulSoup(page, 'html.parser')
+        r = requests.get(link_meta['uri'])
 
-    # Return the list of URLs filtered according to extension
-    return [url + node.get('href') for node in soup.find_all('a') if node.get('href').endswith(ext)]
+        waf_package = dict()
+        waf_package["link_meta"] = link_meta
+        waf_package["headers"] = r.headers
+        waf_package["url_list"] = list()
+
+        soup = BeautifulSoup(r.content, "html.parser")
+
+        if soup.find("pre"):
+            processed_list = dict()
+
+            for index, line in enumerate(soup.pre.children):
+                if index > 1:
+                    try:
+                        line_contents = line.get_text()
+                    except:
+                        line_contents = list(filter(None, str(line).split(" ")))
+                    processed_list[index] = line_contents
+
+            for k, v in processed_list.items():
+                if k % 2 == 0:
+                    if v.split(".")[-1] == "xml":
+                        item = dict()
+                        item["file_name"] = v
+                        item["file_url"] = f"{link_meta['uri']}{v}"
+                        item["file_date"] = dt_parser.parse(
+                            f"{processed_list[k + 1][0]} {processed_list[k + 1][1]}").isoformat()
+                        item["file_size"] = processed_list[k + 1][2].replace("\r\n", "")
+                        waf_package["url_list"].append(item)
+
+        elif soup.find("table"):
+            for index, row in enumerate(soup.table.find_all("tr")):
+                if index > 2:
+                    item = dict()
+                    columns = row.find_all("td")
+                    for i, column in enumerate(columns):
+                        cell_text = column.get_text().strip()
+                        if i == 1:
+                            item["file_name"] = cell_text
+                            item["file_url"] = f"{link_meta['uri']}{cell_text}"
+                        elif i == 2:
+                            item["file_date"] = dt_parser.parse(cell_text).isoformat()
+                        elif i == 3:
+                            item["file_size"] = cell_text
+                    if "file_name" in item.keys() and item["file_name"].split(".")[-1] == "xml":
+                        waf_package["url_list"].append(item)
+
+        return waf_package
+
+    except Exception as e:
+        return e
 
 
 def build_ndc_feature_collection(feature_list):
@@ -148,7 +196,24 @@ def inspect_response_content(response, response_meta=None):
                 del introspection_meta["delimiter"]
 
     elif response_meta["file-class"] == "application":
-        introspection_meta["message"] = "Application file processing not yet implemented"
+        if response_meta["Content-Type"] == "application/xml":
+            try:
+                dictData = xmltodict.parse(response.text, dict_constructor=dict)
+                top_keys = list(dictData.keys())
+                if len(top_keys) == 1:
+                    second_keys = list(dictData[top_keys[0]].keys())
+                    if isinstance(dictData[top_keys[0]][second_keys[-1]], list):
+                        introspection_meta['record_container_path'] = [top_keys[0], second_keys[-1]]
+                        introspection_meta['record_number'] = len(dictData[top_keys[0]][second_keys[-1]])
+                        introspection_meta['field_names'] = list(dictData[top_keys[0]][second_keys[-1]][0].keys())
+                if "record_container_path" not in introspection_meta.keys():
+                    introspection_meta["message"] = "Could not establish processable record container in XML file"
+            except Exception as e:
+                introspection_meta["message"] = f"Could not parse XML file with xmltodict - {e}"
+
+
+        else:
+            introspection_meta["message"] = "Application types other than XML not yet implemented"
 
     else:
         introspection_meta["message"] = "Response contained nothing to process"
@@ -156,7 +221,7 @@ def inspect_response_content(response, response_meta=None):
     return introspection_meta
 
 
-def check_processable(explicit_source_files, source_meta, response_meta, content_meta):
+def check_processable(explicit_source_files, source_meta, content_meta):
     """
     Evaluates source and processed metadata for file content and determines whether the content is processable.
 
@@ -168,6 +233,7 @@ def check_processable(explicit_source_files, source_meta, response_meta, content
     :return: Dictionary containing process parameters
     """
     process_meta = dict()
+    process_meta["date_checked"] = datetime.utcnow().isoformat()
 
     # Pre-flag whether or not we think this is a processable route to collection records
     if len(explicit_source_files) > 0:
@@ -178,26 +244,16 @@ def check_processable(explicit_source_files, source_meta, response_meta, content
     else:
         process_meta["Processable Route"] = True
 
-        # Set processable route to false if we encountered a problem reading a text file
-        if "First Line Extraction Error" in content_meta.keys():
+        # Set processable route to false if we were not able to extract field names from either CSV or XML
+        if "field_names" not in content_meta.keys():
             process_meta["Processable Route"] = False
-        # Set processable route to false if this is one of the old collection metadata files
-        if source_meta["name"] == "metadata.xml" and response_meta["Content-Type"] == "application/xml":
-            process_meta["Processable Route"] = False
-        # Set processable route to false if this is an FGDC XML metadata file
-        if response_meta["Content-Type"] == "application/fgdc+xml":
-            process_meta["Processable Route"] = False
-        # Flag other types of "application" files as not processable at this point
-        if response_meta["Content-Type"].split("/")[0] == "application":
-            if response_meta["Content-Type"].split("/")[1] != "xml":
-                process_meta["Processable Route"] = False
 
     return process_meta
 
 
-def file_meta(collection_id, files=None):
+def file_meta(collection_id, files):
     """
-     Retrieve and package metadata for a set of file (expects list of file objects in ScienceBase Item format).
+     Retrieve and package metadata for a set of files (expects list of file objects in ScienceBase Item format).
 
     :param collection_id: (str) ScienceBase ID of the collection.
     :param files: (list of dicts) file objects in a list from the ScienceBase collection item
@@ -211,14 +267,6 @@ def file_meta(collection_id, files=None):
     # Put a single file object into a list
     if isinstance(files, dict):
         files = [files]
-
-    # Get files if not provided
-    if files is None:
-        collections = ndcCollection.ndc_get_collections(collection_id=collection_id, fields="title,contacts,files")
-        if collections is None or len(collections) == 0:
-            return {"Error": "Cannot run without files being provided"}
-        collection = collections[0]
-        files = collection["files"]
 
     # Check for explicit Source Data flagging in the collection
     explicit_source_files = [f["pathOnDisk"] for f in files if "title" in f.keys() and f["title"] == "Source Data"]
@@ -234,7 +282,6 @@ def file_meta(collection_id, files=None):
 
         # Add context
         metadata["collection_id"] = collection_id
-        metadata["Date Checked"] = datetime.utcnow().isoformat()
 
         # Retrieve the file to check things out
         response = requests.get(file["url"], stream=True)
@@ -248,14 +295,7 @@ def file_meta(collection_id, files=None):
         # Determine whether or not the file route is a processable one for the NDC
         metadata["process_meta"] = check_processable(explicit_source_files,
                                                      metadata["source_meta"],
-                                                     metadata["response_meta"],
                                                      metadata["content_meta"])
-
-        # Add collection metadata summary for processing convenience
-        if "collection" in locals():
-            metadata["collection_meta"] = ndcCollection.collection_metadata_summary(collection=collection)
-        else:
-            metadata["collection_meta"] = ndcCollection.collection_metadata_summary(collection_id=collection_id)
 
         evaluated_file_list.append(metadata)
 
@@ -329,13 +369,9 @@ def link_meta(collection_id, webLinks=None):
                 for k,v in response.headers.items():
                     metadata["response_meta"][k] = v
                 metadata["content_meta"] = dict()
-                metadata["content_meta"]["waf_links"] = list_waf(url=link["uri"], response=response)
-
-        # Add collection metadata summary for processing convenience
-        if "collection" in locals():
-            metadata["collection_meta"] = ndcCollection.collection_metadata_summary(collection=collection)
-        else:
-            metadata["collection_meta"] = ndcCollection.collection_metadata_summary(collection_id=collection_id)
+                metadata["content_meta"]["waf_links"] = list()
+                for url in list_waf(url=link["uri"], response=response):
+                    metadata["content_meta"]["waf_links"].append({"url": url})
 
         evaluated_link_list.append(metadata)
 
@@ -558,33 +594,6 @@ def process_log_entry(collection_id, processing_meta, errors=None):
     return log_entry
 
 
-def ndc_collection_from_waf(waf_url, link_list=None):
-
-    if link_list is None:
-        link_list = list_waf(waf_url)
-
-    feature_list = []
-
-    for link in link_list:
-        iso_xml = requests.get(link).text
-        parsed_iso = IsoParser(iso_xml)
-
-        coordinates = parsed_iso.bounding_box['east'] + ',' + parsed_iso.bounding_box['south']
-        pointGeometry = build_point_geometry(coordinates)
-
-        item = {}
-        item['title'] = parsed_iso.title
-        item['abstract'] = parsed_iso.abstract
-        item['place_keywords'] = parsed_iso.place_keywords
-        item['thematic_keywords'] = parsed_iso.thematic_keywords
-        item['temporal_keywords'] = parsed_iso.temporal_keywords
-
-        feature_list.append(build_ndc_feature(pointGeometry, item))
-
-    waf_feature_collection = FeatureCollection(feature_list)
-    return waf_feature_collection
-
-
 def set_env_variables(config_file):
     try:
         env_vars_set = []
@@ -608,6 +617,176 @@ def mongodb_client():
         "MONGODB_SERVER"] + "/" + os.environ["MONGODB_DATABASE"]
     client = MongoClient(mongo_uri)
     return client.get_database(os.environ["MONGODB_DATABASE"])
+
+
+@timeout_decorator.timeout(20)
+def feature_from_metadata(collection_meta, link_meta):
+    """
+    Parses FGDC-CSDGM, ISO19115, and ArcGIS metadata XML responses retrieved via HTTP from a WAF and builds a GeoJSON
+    feature with properties in common across the 3 metadata dialects. Because of our use case in working with point
+    geometry at this point, the function attempts to build a point from a supplied bounding box in the metadata. It
+    deals with a convention used in the National Geothermal Data System of building a "minimal" bounding box with the
+    same east/west and south/north coordinates, using one "corner" for the point. In the case of an actual bounding
+    box, the function generates a centroid and uses that as the feature geometry.
+
+    :param collection_meta: Dictionary containing a summary of the collection metadata
+    :param link_meta: Dictionary containing properties about the link generated with parse_waf()
+    :return: GeoJSON point feature built from harvested FGDC or ISO XML metadata document
+
+    Note: This function will need quite a bit of refinement once we start working with the feature collections and
+    determine what all properties we want to work with. We may need to dig deeper than the few high-level abstract
+    properties the gis_metadata parser tools pull out.
+    """
+
+    try:
+        if not validators.url(link_meta["file_url"]):
+            raise Exception(f"URL is not valid - {link_meta['file_url']}")
+
+        if not isinstance(collection_meta, dict):
+            raise Exception("Collection metadata dictionary must be provided")
+
+        if not isinstance(link_meta, dict):
+            raise Exception("Link metadata dictionary must be provided")
+
+        meta_response = requests.get(link_meta["file_url"])
+
+        # Declare a dictionary structure to contain the properties
+        p = dict()
+
+        # Add NDC-specific object to contain infused properties
+        p["ndc_meta"] = dict()
+
+        # Infuse collection metadata properties
+        p["ndc_meta"].update(collection_meta)
+
+        # Infuse link metadata properties
+        p["ndc_meta"].update(link_meta)
+
+        # Add processing date for reference
+        p["ndc_meta"]["date_created"] = datetime.utcnow().isoformat()
+
+        # Add in the Last-Modified date from the HTTP response if available, which will be useful in checking for updates
+        # Last-Modified is not always provided in the HTTP response depending on the sending server
+        if "Last-Modified" in meta_response.headers.keys():
+            p["ndc_meta"]["source_file_last_modified"] = \
+                dt_parser.parse(meta_response.headers["Last-Modified"]).isoformat()
+
+        # Parse the metadata using the gis_metadata tools
+        parsed_metadata = get_metadata_parser(meta_response.text)
+
+        # Add any and all properties that aren't blank (ref. gis_metadata.utils.get_supported_props())
+        if len(parsed_metadata.abstract) > 0:
+            p['abstract'] = parsed_metadata.abstract
+        if len(parsed_metadata.resource_desc) > 0:
+            p['resource_desc'] = parsed_metadata.resource_desc
+        if len(parsed_metadata.place_keywords) > 0:
+            p['place_keywords'] = parsed_metadata.place_keywords
+        if len(parsed_metadata.contacts) > 0:
+            p['contacts'] = parsed_metadata.contacts
+        if len(parsed_metadata.use_constraints) > 0:
+            p['use_constraints'] = parsed_metadata.use_constraints
+        if len(parsed_metadata.originators) > 0:
+            p['originators'] = parsed_metadata.originators
+        if len(parsed_metadata.dist_contact_person) > 0:
+            p['dist_contact_person'] = parsed_metadata.dist_contact_person
+        if len(parsed_metadata.dist_liability) > 0:
+            p['dist_liability'] = parsed_metadata.dist_liability
+        if len(parsed_metadata.dist_contact_org) > 0:
+            p['dist_contact_org'] = parsed_metadata.dist_contact_org
+        if len(parsed_metadata.dist_email) > 0:
+            p['dist_email'] = parsed_metadata.dist_email
+        if len(parsed_metadata.dist_address) > 0:
+            p['dist_address'] = parsed_metadata.dist_address
+        if len(parsed_metadata.dist_phone) > 0:
+            p['dist_phone'] = parsed_metadata.dist_phone
+        if len(parsed_metadata.purpose) > 0:
+            p['purpose'] = parsed_metadata.purpose
+        if len(parsed_metadata.bounding_box) > 0:
+            p['bounding_box'] = parsed_metadata.bounding_box
+        if len(parsed_metadata.stratum_keywords) > 0:
+            p['stratum_keywords'] = parsed_metadata.stratum_keywords
+        if len(parsed_metadata.temporal_keywords) > 0:
+            p['temporal_keywords'] = parsed_metadata.temporal_keywords
+        if len(parsed_metadata.attributes) > 0:
+            p['attributes'] = parsed_metadata.attributes
+        if len(parsed_metadata.online_linkages) > 0:
+            p['online_linkages'] = parsed_metadata.online_linkages
+        if len(parsed_metadata.processing_instrs) > 0:
+            p['processing_instrs'] = parsed_metadata.processing_instrs
+        if len(parsed_metadata.dates) > 0:
+            p['dates'] = parsed_metadata.dates
+        if len(parsed_metadata.tech_prerequisites) > 0:
+            p['tech_prerequisites'] = parsed_metadata.tech_prerequisites
+        if len(parsed_metadata.process_steps) > 0:
+            p['process_steps'] = parsed_metadata.process_steps
+        if len(parsed_metadata.processing_fees) > 0:
+            p['processing_fees'] = parsed_metadata.processing_fees
+        if len(parsed_metadata.title) > 0:
+            p['title'] = parsed_metadata.title
+        if len(parsed_metadata.thematic_keywords) > 0:
+            p['thematic_keywords'] = parsed_metadata.thematic_keywords
+        if len(parsed_metadata.dist_state) > 0:
+            p['dist_state'] = parsed_metadata.dist_state
+        if len(parsed_metadata.data_credits) > 0:
+            p['data_credits'] = parsed_metadata.data_credits
+        if len(parsed_metadata.dist_country) > 0:
+            p['dist_country'] = parsed_metadata.dist_country
+        if len(parsed_metadata.dataset_completeness) > 0:
+            p['dataset_completeness'] = parsed_metadata.dataset_completeness
+        if len(parsed_metadata.raster_info) > 0:
+            p['raster_info'] = parsed_metadata.raster_info
+        if len(parsed_metadata.publish_date) > 0:
+            p['publish_date'] = parsed_metadata.publish_date
+        if len(parsed_metadata.dist_city) > 0:
+            p['dist_city'] = parsed_metadata.dist_city
+        if len(parsed_metadata.dist_postal) > 0:
+            p['dist_postal'] = parsed_metadata.dist_postal
+        if len(parsed_metadata.attribute_accuracy) > 0:
+            p['attribute_accuracy'] = parsed_metadata.attribute_accuracy
+        if len(parsed_metadata.larger_works) > 0:
+            p['larger_works'] = parsed_metadata.larger_works
+        if len(parsed_metadata.supplementary_info) > 0:
+            p['supplementary_info'] = parsed_metadata.supplementary_info
+
+        # Process geometry if a bbox exists
+        p['coordinates_point'] = {}
+
+        if len(parsed_metadata.bounding_box) > 0:
+            # Pull out bounding box elements
+            east = float(parsed_metadata.bounding_box["east"])
+            west = float(parsed_metadata.bounding_box["west"])
+            south = float(parsed_metadata.bounding_box["south"])
+            north = float(parsed_metadata.bounding_box["north"])
+
+            # Record a couple processable forms of the BBOX for later convenience
+            p['coordinates_geojson'] = [[west, north], [east, north], [east, south], [west, south]]
+            p['coordinates_wkt'] = [[(west, north), (east, north), (east, south), (west, south), (west, north)]]
+
+            # Determine the best way to provide point coordinates and record the method
+            if east == west and south == north:
+                p['coordinates_point']['coordinates'] = f"{east},{south}"
+                p['coordinates_point']['method'] = "bbox corner"
+            else:
+                c = centroid(Polygon(p['coordinates_wkt']))['coordinates']
+                p['coordinates_point']['coordinates'] = f"{c[0]},{c[1]}"
+                p['coordinates_point']['method'] = "bbox centroid"
+        else:
+            p['coordinates_point']['coordinates'] = None
+            p['coordinates_point']['method'] = "no processable geometry"
+
+        # Generate the point geometry
+        g = build_point_geometry(p["coordinates_point"]["coordinates"])
+
+        # Build the GeoJSON feature from the geometry with its properties
+        f = build_ndc_feature(g, p)
+
+        # Convert the geojson object to a standard dict
+        f = json.loads(geojson_dumps(f))
+
+        return f
+
+    except Exception as e:
+        return e
 
 
 def parse_args(args):

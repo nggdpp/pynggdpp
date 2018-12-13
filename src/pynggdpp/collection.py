@@ -62,6 +62,7 @@ def collection_metadata_summary(collection=None, collection_id=None):
         collection_record = collection
 
     metadata_summary = dict()
+    metadata_summary["collection_id"] = collection_record["id"]
     metadata_summary["Collection Title"] = collection_record["title"]
     metadata_summary["Collection Link"] = collection_record["link"]["url"]
 
