@@ -499,19 +499,19 @@ def nggdpp_record_list_to_geojson(record_source, file_meta):
         p = {k.lower(): v for k, v in p.items()}
 
         # Infuse file properties
-        p["source_file"] = file_meta["source_meta"]["url"]
-        p["source_file_uploaded"] = file_meta["source_meta"]["dateUploaded"]
+        p["ndc_source_file"] = file_meta["source_meta"]["url"]
+        p["ndc_source_file_date"] = file_meta["source_meta"]["dateUploaded"]
 
         # Add date this record was produced from source
-        p["build_from_source_date"] = datetime.utcnow().isoformat()
+        p["ndc_record_build_date"] = datetime.utcnow().isoformat()
 
         # Infuse collection-level metadata properties
-        p["collection_id"] = file_meta["collection_id"]
+        p["ndc_collection_id"] = file_meta["collection_id"]
         for k, v in file_meta["collection_meta"].items():
             p[k] = v
 
         # Set up a processing errors container
-        p["processing_errors"] = []
+        p["ndc_processing_errors"] = []
 
         # For now, I opted to take alternate forms of coordinates and put them into a coordinates property to keep
         # with the same overall processing logic
@@ -531,7 +531,7 @@ def nggdpp_record_list_to_geojson(record_source, file_meta):
             except Exception as e:
                 this_error = processing_error("geometry",
                                                     f"{e}; {str(p['coordinates'])}; kept empty geometry")
-                p["processing_errors"].append(this_error)
+                p["ndc_processing_errors"].append(this_error)
                 processing_meta["Number of Errors"] += 1
 
         # Add feature to list

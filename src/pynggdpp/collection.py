@@ -49,6 +49,17 @@ def ndc_get_collections(parentId=sb_ndc_id, fields=default_fields_collections, c
 
 
 def collection_metadata_summary(collection=None, collection_id=None):
+    """
+    Packages a collection_meta object containing high level summary metadata for collections to be infused into
+    individual record properties.
+
+    :param collection: Dictionary object containing the collection details from the ndc_collections collection for
+    cases where this information has already been retrieved in a workflow.
+    :param collection_id: Collection identifier (ScienceBase ID) for a collection in UUID form used to retrieve the
+    collection when needed.
+    :return: Dictionary object containing summary metadata following a convention of property names used to infuse
+    collection metadata into individual collection record properties
+    """
     if collection is None:
         collection_record = ndc_get_collections(collection_id=collection_id, fields="title,contacts")
         if collection_record is None:
@@ -61,20 +72,20 @@ def collection_metadata_summary(collection=None, collection_id=None):
     else:
         collection_record = collection
 
-    metadata_summary = dict()
-    metadata_summary["collection_id"] = collection_record["id"]
-    metadata_summary["Collection Title"] = collection_record["title"]
-    metadata_summary["Collection Link"] = collection_record["link"]["url"]
+    collection_meta = dict()
+    collection_meta["ndc_collection_id"] = collection_record["id"]
+    collection_meta["ndc_collection_title"] = collection_record["title"]
+    collection_meta["ndc_collection_link"] = collection_record["link"]["url"]
 
     if "contacts" in collection_record.keys():
-        metadata_summary["Collection Owner"] = [c["name"] for c in collection_record["contacts"]
+        collection_meta["ndc_collection_owner"] = [c["name"] for c in collection_record["contacts"]
                                if "type" in c.keys() and c["type"] == "Data Owner"]
-        if len(metadata_summary["Collection Owner"]) == 0:
-            metadata_summary["Collection Improvement Needed"] = "Need data owner contact in collection metadata"
+        if len(collection_meta["ndc_collection_owner"]) == 0:
+            collection_meta["ndc_collection_improvements_needed"] = ["Need data owner contact in collection metadata"]
     else:
-        metadata_summary["Collection Improvement Needed"] = "Need contacts in collection metadata"
+        collection_meta["ndc_collection_improvements_needed"] = ["Need contacts in collection metadata"]
 
-    return metadata_summary
+    return collection_meta
 
 
 def parse_args(args):
