@@ -5,6 +5,7 @@ import argparse
 import sys
 import logging
 import requests
+import os
 
 from pynggdpp import __version__
 
@@ -14,17 +15,19 @@ __license__ = "public-domain"
 
 _logger = logging.getLogger(__name__)
 
-sb_vocab_path = 'https://www.sciencebase.gov/vocab'
-sb_vocab_id_ndc = '5bf3f7bce4b00ce5fb627d57'
 
-sb_catalog_path = 'https://www.sciencebase.gov/catalog/items?format=json&max=1000'
-sb_ndc_id = '4f4e4760e4b07f02db47dfb4'
+def ndc_collection_type_tag(tag_name, include_type=True):
+    """
+    Queries the ScienceBase Vocabulary for a particular NDC collection type and returns the JSON structure that can
+    be used to filter items by that tag.
 
-default_fields_collections = 'title,body,contacts,spatial,files,webLinks,facets'
-
-
-def ndc_collection_type_tag(tag_name,include_type=True):
-    vocab_search_url = f'{sb_vocab_path}/{sb_vocab_id_ndc}/terms?nodeType=term&format=json&name={tag_name}'
+    :param tag_name: (string) Simple name of the tag
+    :param include_type: (true/false) Specify whether or not to include type specification in the query
+    :return: JSON structure of the tag used in querying ScienceBase Catalog
+    """
+    vocab_search_url = f'{os.environ["SB_VOCAB_PATH"]}/' \
+                       f'{os.environ["SB_VOCAB_NDC_ID"]}/' \
+                       f'terms?nodeType=term&format=json&name={tag_name}'
     r_vocab_search = requests.get(vocab_search_url).json()
     if len(r_vocab_search['list']) == 1:
         tag = {'name':r_vocab_search['list'][0]['name'],'scheme':r_vocab_search['list'][0]['scheme']}
@@ -35,8 +38,18 @@ def ndc_collection_type_tag(tag_name,include_type=True):
         return None
 
 
-def ndc_get_collections(parentId=sb_ndc_id, fields=default_fields_collections, collection_id=None):
-    sb_query_collections = f'{sb_catalog_path}&' \
+def ndc_get_collections(parentId=os.environ['SB_CATALOG_NDC_ID'], fields=os.environ['SB_CATALOG_DEFAULT_PROPS'], collection_id=None):
+    """
+    Query ScienceBase for National Digital Catalog collection metadata records.
+
+    :param parentId: (string) Parent container identifier in ScienceBase; defaults to an environment variable setting
+    :param fields: (string) Comma-separated list of properties to include in the return; defaults to a set controlled
+    by an environment variable
+    :param collection_id: (string) Optional specific collection ID for cases when only one particular collection is
+    desired
+    :return: (list of dictionaries) Returns the list of items from the ScienceBase API
+    """
+    sb_query_collections = f'{os.environ["SB_CATALOG_PATH"]}&' \
                            f'fields={fields}&' \
                            f'folderId={parentId}&' \
                            f"filter=tags%3D{ndc_collection_type_tag('ndc_collection',False)}"
@@ -89,7 +102,8 @@ def collection_metadata_summary(collection=None, collection_id=None):
 
 
 def parse_args(args):
-    """Parse command line parameters
+    """
+    Parse command line parameters
 
     Args:
       args ([str]): command line parameters as list of strings

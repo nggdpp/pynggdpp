@@ -14,6 +14,7 @@ from datetime import datetime
 import dateutil.parser as dt_parser
 from gis_metadata.metadata_parser import get_metadata_parser
 import json
+import csv
 import os
 from pymongo import MongoClient
 import pandas as pd
@@ -42,6 +43,10 @@ def build_point_geometry(coordinates):
 def build_ndc_feature(geom, props):
     ndcFeature = Feature(geometry=geom, properties=props)
     return ndcFeature
+
+
+def build_ndc_feature_collection(feature_list):
+    return FeatureCollection(feature_list)
 
 
 def parse_waf(link_meta):
@@ -112,10 +117,6 @@ def parse_waf(link_meta):
 
     except Exception as e:
         return e
-
-
-def build_ndc_feature_collection(feature_list):
-    return FeatureCollection(feature_list)
 
 
 def inspect_response(response):
@@ -387,34 +388,36 @@ def nggdpp_xml_to_dicts(file_meta):
     returned indicates that an error occurred, and that is supplied in the return.
     """
 
-    if file_meta["response_meta"]["Content-Type"] != "application/xml":
-        output = {"Error": "File is not application/xml"}
-        return output
-    else:
-        # Read the XML file data and convert to a dictionary for ease of use
-        xmlData = requests.get(file_meta["source_meta"]["url"]).text
-        dictData = xmltodict.parse(xmlData, dict_constructor=dict)
+    try:
+        if file_meta["response_meta"]["Content-Type"] != "application/xml":
+            raise Exception("File content type is not application/xml")
 
-        # Handle the corner case (come up with a more elegant way of detecting XML structure
-        if 'samples' in dictData.keys():
-            output = dictData['samples']['sample']
-        elif 'historictopomaps' in dictData.keys():
-            output = dictData['historictopomaps']['topomap']
-        elif 'aerial' in dictData.keys():
-            output = dictData['aerial']['aerial']
-        else:
-            output = {"Error": "Could not find processable items in XML file"}
+        if not isinstance(file_meta['content_meta']['record_container_path'], list):
+            raise Exception("No record container path recorded for file")
 
-        if not isinstance(output, list):
-            output = {"Error": "Output from process is not a list"}
-        else:
-            if len(output) == 0:
-                output = {"Error": "File processing produced an empty list of records"}
-            else:
-                if not isinstance(output[0], dict):
-                    output = {"Error": "First element of source list of dicts is not a dict"}
+        if not len(file_meta['content_meta']['record_container_path']) == 2:
+            raise Exception("Record container path does not contain the proper number of items")
 
-        return output
+        xml_data = requests.get(file_meta["source_meta"]["url"]).text
+        d_data = xmltodict.parse(xml_data, dict_constructor=dict)
+
+        xml_tree_top = file_meta['content_meta']['record_container_path'][0]
+        xml_tree_next = file_meta['content_meta']['record_container_path'][1]
+        record_list = d_data[xml_tree_top][xml_tree_next]
+
+        if not isinstance(record_list, list):
+            raise Exception("Could not establish list of records in XML data")
+
+        if len(record_list) == 0:
+            raise Exception("File processing produced an empty list of records")
+
+        if not isinstance(record_list[0], dict):
+            raise Exception("First element of record list is not a dictionary")
+
+        return record_list
+
+    except Exception as e:
+        return e
 
 
 def nggdpp_text_to_dicts(file_meta):
@@ -429,31 +432,25 @@ def nggdpp_text_to_dicts(file_meta):
     if file_meta["response_meta"]["file-class"] != "text":
         output = {"Error": "Cannot process non-text files at this time"}
     else:
-        if "delimiter" in file_meta["content_meta"].keys():
-            try:
-                df_file = pd.read_csv(file_meta["source_meta"]["url"],
-                                      sep=file_meta["content_meta"]["delimiter"],
-                                      encoding=file_meta["content_meta"]["encoding"])
-            except Exception as e:
-                df_file = pd.read_csv(file_meta["source_meta"]["url"],
-                                      sep=file_meta["content_meta"]["delimiter"],
-                                      encoding="latin1")
-            finally:
-                output = {"Error": "Problem reading text file with Pandas"}
-                return output
-
+        if "delimiter" not in file_meta["content_meta"].keys():
+            output = {"Error": "Cannot process text files with an indeterminate delimiter"}
         else:
             try:
                 df_file = pd.read_csv(file_meta["source_meta"]["url"],
-                                      sep="|", encoding=file_meta["content_meta"]["encoding"])
-
-                # If that only produces a single column dataframe, we try a comma.
-                if len(list(df_file)) == 1:
-                    df_file = pd.read_csv(file_meta["source_meta"]["url"],
-                                          sep=",", encoding=file_meta["content_meta"]["encoding"])
-            except Exception as e:
-                output = {"Error": "Problem reading text file with Pandas", "Exception": str(e)}
-                return output
+                                      sep=file_meta["content_meta"]["delimiter"],
+                                      encoding=file_meta["content_meta"]["encoding"],
+                                      error_bad_lines=False,
+                                      quoting=csv.QUOTE_NONE)
+            except UnicodeDecodeError:
+                # Catches cases where there are characters with different encoding within some types of Windows files
+                # latin1 deals with everything but may introduce weird characters into the final output
+                df_file = pd.read_csv(file_meta["source_meta"]["url"],
+                                      sep=file_meta["content_meta"]["delimiter"],
+                                      encoding="latin1",
+                                      error_bad_lines=False,
+                                      quoting=csv.QUOTE_NONE)
+            finally:
+                output = {"Error": "Cannot read and process text file with current encoding"}
 
         if "df_file" in locals():
             # Drop all the rows with empty cells.
@@ -462,7 +459,8 @@ def nggdpp_text_to_dicts(file_meta):
             # Drop all unnamed columns
             df_file.drop(df_file.columns[df_file.columns.str.contains('unnamed', case=False)], axis=1)
 
-            # Outputting the dataframe to JSON and then loading to a dictionary makes for the cleanest eventual GeoJSON.
+            # Outputting the dataframe to JSON and then loading to a list of dicts makes for the cleanest eventual
+            # GeoJSON.
             json_file = df_file.to_json(orient="records")
 
             # Set source list to a list of dictionaries from the JSON construct
@@ -476,7 +474,7 @@ def nggdpp_record_list_to_geojson(record_source, file_meta):
     Take a list of dictionaries containing NGGDPP records, convert to GeoJSON features, and return a Feature Collection
 
     :param record_source: List of dictionaries from either file processing or WAF processing
-    :param file_meta: File metadata structure from the ndc_files pre-processing
+    :param file_meta: File metadata dictionary from the ndc_files pre-processing
     :return: Note: The expected output of this function is a dictionary containing the original file_meta structure,
     a GeoJSON feature collection, and a processing log containing a report of the process. In the workflow, the
     processing log is added to the collection record in the ndc_log data store, and the features from the
@@ -488,9 +486,6 @@ def nggdpp_record_list_to_geojson(record_source, file_meta):
     processing_meta = dict()
     processing_meta["collection_id"] = file_meta["collection_id"]
     processing_meta["source_file_url"] = file_meta["source_meta"]["url"]
-    processing_meta["source_file_pathOnDisk"] = file_meta["source_meta"]["pathOnDisk"]
-    processing_meta["source_file_dateUploaded"] = file_meta["source_meta"]["dateUploaded"]
-    processing_meta["source_file_content-type"] = file_meta["response_meta"]["Content-Type"]
     processing_meta["Number of Errors"] = 0
 
     feature_list = []
@@ -538,7 +533,7 @@ def nggdpp_record_list_to_geojson(record_source, file_meta):
         feature_list.append(build_ndc_feature(g, p))
 
     # Add some extra file processing metadata
-    processing_meta["processed_date"] = datetime.utcnow().isoformat()
+    processing_meta["date_processed"] = datetime.utcnow().isoformat()
     processing_meta["record_number"] = len(feature_list)
 
     # Make a Feature Collection from the feature list
@@ -546,7 +541,7 @@ def nggdpp_record_list_to_geojson(record_source, file_meta):
     # beyond our immediate use case.
     processing_package = dict()
     processing_package["processing_meta"] = processing_meta
-    processing_package["Feature Collection"] = FeatureCollection(feature_list)
+    processing_package["feature_collection"] = json.loads(geojson_dumps(FeatureCollection(feature_list)["features"]))
 
     return processing_package
 
