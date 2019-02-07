@@ -56,9 +56,21 @@ def ndc_get_collections(parentId=os.environ['SB_CATALOG_NDC_ID'], fields=os.envi
     if collection_id is not None:
         sb_query_collections = f"{sb_query_collections}&id={collection_id}"
 
-    r_ndc_collections = requests.get(sb_query_collections).json()
+    collectionItems = list()
+    nextLink = sb_query_collections
 
-    return r_ndc_collections['items']
+    while nextLink is not None:
+        r_ndc_collections = requests.get(nextLink).json()
+
+        if "items" in r_ndc_collections.keys():
+            collectionItems.extend(r_ndc_collections["items"])
+
+        if "nextLink" in r_ndc_collections.keys():
+            nextLink = r_ndc_collections["nextLink"]["url"]
+        else:
+            nextLink = None
+
+    return collectionItems
 
 
 def collection_metadata_summary(collection=None, collection_id=None):
