@@ -49,15 +49,14 @@ def ndc_get_collections(parentId=os.environ['SB_CATALOG_NDC_ID'], fields=os.envi
     desired
     :return: (list of dictionaries) Returns the list of items from the ScienceBase API
     """
-    sb_query_collections = f'{os.environ["SB_CATALOG_PATH"]}&' \
+    nextLink = f'{os.environ["SB_CATALOG_PATH"]}&' \
                            f'fields={fields}&' \
                            f'folderId={parentId}&' \
                            f"filter=tags%3D{ndc_collection_type_tag('ndc_collection',False)}"
     if collection_id is not None:
-        sb_query_collections = f"{sb_query_collections}&id={collection_id}"
+        nextLink= f"{nextLink}&id={collection_id}"
 
     collectionItems = list()
-    nextLink = sb_query_collections
 
     while nextLink is not None:
         r_ndc_collections = requests.get(nextLink).json()
@@ -65,8 +64,8 @@ def ndc_get_collections(parentId=os.environ['SB_CATALOG_NDC_ID'], fields=os.envi
         if "items" in r_ndc_collections.keys():
             collectionItems.extend(r_ndc_collections["items"])
 
-        if "nextLink" in r_ndc_collections.keys():
-            nextLink = r_ndc_collections["nextLink"]["url"]
+        if "nextlink" in r_ndc_collections.keys():
+            nextLink = r_ndc_collections["nextlink"]["url"]
         else:
             nextLink = None
 
@@ -86,7 +85,7 @@ def collection_metadata_summary(collection=None, collection_id=None):
     collection metadata into individual collection record properties
     """
     if collection is None:
-        collection_record = ndc_get_collections(collection_id=collection_id, fields="title,contacts")
+        collection_record = ndc_get_collections(collection_id=collection_id, fields="title,contacts,dates")
         if collection_record is None:
             return {"Error": "Collection record could not be retrieved or is not a valid NDC collection"}
 
@@ -101,6 +100,10 @@ def collection_metadata_summary(collection=None, collection_id=None):
     collection_meta["ndc_collection_id"] = collection_record["id"]
     collection_meta["ndc_collection_title"] = collection_record["title"]
     collection_meta["ndc_collection_link"] = collection_record["link"]["url"]
+    collection_meta["ndc_collection_last_updated"] = next((d["dateString"] for d in collection_record["dates"]
+                                                           if d["type"] == "lastUpdated"), None)
+    collection_meta["ndc_collection_created"] = next((d["dateString"] for d in collection_record["dates"]
+                                                           if d["type"] == "dateCreated"), None)
 
     if "contacts" in collection_record.keys():
         collection_meta["ndc_collection_owner"] = [c["name"] for c in collection_record["contacts"]
