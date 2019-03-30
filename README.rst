@@ -2,10 +2,11 @@
 pynggdpp
 ========
 
-This package provides a number of core functions associated with managing data for the National Digital Catalog (NDC) of Geological and Geophysical Data. It also serves as the focal point for documenting the underlying architecture of "NDC 2.0," a re-imagining of the platform for documenting and providing access to the Nation's treasure trove of physical geoscience data assets.
+This package provides all of the core functional logic associated with building and interfacing with the National Digital Catalog of Geological and Geophysical Data. An earlier instance of this package is in the GitHub repo for posterity, but it has been completely redesigned from what that was. I first ran into issues with the pyscaffold project I used to build out documentation being incompatible with the AWS Lambda environment where I set up a serverless approach to collection processing. That prompted this more barebones, scaled back version of the package. I still have a lot to learn about packaing Python code, so I apologize in advance for the messiness in this package and its modules and classes.
+
+The intent of the package is to provide a master store of all the stuff needed to work the NDC from data processing to the functions that drive the REST API. The data processing pipeline that uses some of the functions in this package can be found at https://github.com/nggdpp/ndc-pipeline. All of the secure data system and AWS connections references in this package require environment variables to be set for whatever environment is being used. Everything was developed initially on local instances or Docker containers before being moved online, and the intent is for others to be able to jump in and hack on this code to make it better.
 
 Install the Python package with PIP:
 
 pip install git+https://github.com/nggdpp/pynggdpp.git
 
-Read the docs.

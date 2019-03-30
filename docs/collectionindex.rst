@@ -1,4 +1,0 @@
-.. _collectionindex:
-
-Collection Index
-****************

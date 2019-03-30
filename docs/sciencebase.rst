@@ -1,5 +1,0 @@
-.. _sciencebase:
-
-ScienceBase
-***********
-

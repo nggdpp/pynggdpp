@@ -1,4 +1,0 @@
-.. _linkeddata:
-
-Linked Data
-***********
