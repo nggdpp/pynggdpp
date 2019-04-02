@@ -282,6 +282,8 @@ class Files:
 
         item_record["ndc_date_file_indexed"] = datetime.utcnow().isoformat()
 
+        meta["accepted_record_number"] = 1
+
         return {
             "processing_metadata": meta,
             "recordset": [item_record]
@@ -407,10 +409,26 @@ class Spatial:
         return f
 
     def build_point_geometry(self, coordinates):
+        if coordinates == "0,0":
+            return Point(None)
+
+        probable_lng, probable_lat = map(float, coordinates.split(","))
+
+        # Reverse coordinates if reasonable
+        if int(probable_lat) not in range(-90, 90) and int(probable_lng) in range(-90, 90):
+            lat = float(probable_lng)
+            lng = float(probable_lat)
+        else:
+            lat = float(probable_lat)
+            lng = float(probable_lng)
+
         try:
-            pointGeometry = Point((float(coordinates.split(',')[0]), float(coordinates.split(',')[1])))
+            pointGeometry = Point((lng, lat))
+            if not pointGeometry.is_valid:
+                pointGeometry = Point(None)
         except:
             pointGeometry = Point(None)
+
         return pointGeometry
 
     def build_ndc_feature(self, geom, props):
