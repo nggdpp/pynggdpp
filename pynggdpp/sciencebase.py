@@ -71,8 +71,6 @@ class Collections:
                                f'folderId={self.ndc_catalog_id}&' \
                                f"filter=tags%3D{self.ndc_collection_type_tag('ndc_collection',False)}"
 
-        print(nextLink)
-
         if query is not None:
             nextLink = f"{nextLink}&q={query}"
 
