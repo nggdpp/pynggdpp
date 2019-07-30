@@ -83,9 +83,9 @@ class Links:
 
 class Files:
     def __init__(self):
-        self.aws_storage = Storage()
+        #self.aws_storage = Storage()
         self.spatial_processor = Spatial()
-        self.rest_search = Search()
+        #self.rest_search = Search()
         self.temporal_processor = Temporal()
 
     def introspect_nggdpp_xml(self, dict_data):

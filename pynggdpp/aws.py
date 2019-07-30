@@ -1,4 +1,3 @@
-from datetime import datetime
 import os
 import json
 from io import BytesIO
@@ -18,9 +17,15 @@ class Connect:
 
     def aws_client(self, service, type="client"):
         if type == "client":
-            return boto3.client(service.lower(), endpoint_url=os.environ[f"AWS_HOST_{service}"])
+            if f"AWS_HOST_{service}" in os.environ:
+                return boto3.client(service.lower(), endpoint_url=os.environ[f"AWS_HOST_{service}"])
+            else:
+                return boto3.client(service.lower())
         elif type == "resource":
-            return boto3.resource(service.lower(), endpoint_url=os.environ[f"AWS_HOST_{service}"])
+            if f"AWS_HOST_{service}" in os.environ:
+                return boto3.resource(service.lower(), endpoint_url=os.environ[f"AWS_HOST_{service}"])
+            else:
+                return boto3.resource(service.lower())
 
     def elastic_client(self):
         return Elasticsearch(hosts=[os.environ["AWS_HOST_Elasticsearch"]])
@@ -62,6 +67,10 @@ class Search:
 
     def index_record(self, index_name, doc_type, doc):
         r = self.es.index(index=index_name, doc_type=doc_type, body=doc)
+        return r
+
+    def update_record(self, index_name, doc_type, doc_id, doc):
+        r = self.es.update(index=index_name, doc_type=doc_type, id=doc_id, body=doc)
         return r
 
     def ndc_index_mapping(self, doc_type):

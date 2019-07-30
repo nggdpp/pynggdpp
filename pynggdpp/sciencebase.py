@@ -1,9 +1,6 @@
 from datetime import datetime
 import requests
 
-from .item_process import Files
-
-
 class Organizations:
     def __init__(self):
         data = None
@@ -74,6 +71,8 @@ class Collections:
                                f'folderId={self.ndc_catalog_id}&' \
                                f"filter=tags%3D{self.ndc_collection_type_tag('ndc_collection',False)}"
 
+        print(nextLink)
+
         if query is not None:
             nextLink = f"{nextLink}&q={query}"
 
@@ -92,6 +91,13 @@ class Collections:
 
         if len(collectionItems) == 0:
             collectionItems = None
+        else:
+            # For some reason, the ScienceBase API is returning duplicate records.
+            # This step gets unique IDs and then adds the first record for each to the array.
+            unique_collections = list()
+            for unique_id in list(set([i["id"] for i in collectionItems])):
+                unique_collections.append(next(i for i in collectionItems if i["id"] == unique_id))
+            collectionItems = unique_collections
 
         return collectionItems
 
@@ -189,6 +195,7 @@ class Files:
                                 "ndc_harvest_source": "ScienceBase",
                                 "ndc_file_name": file_obj["name"],
                                 "ndc_file_url": file_obj["url"],
+                                "ndc_collection_id": file_obj["url"].split("/")[-1].split("?")[0],
                                 "ndc_file_date": file_obj["dateUploaded"],
                                 "ndc_file_size": file_obj["size"],
                                 "ndc_file_content_type": file_obj["contentType"]
@@ -238,3 +245,4 @@ class Files:
             return_file["ndc_actionable"] = False
 
         return return_file
+
