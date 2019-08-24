@@ -100,7 +100,23 @@ class Files:
 
         return introspection_meta
 
-    def clean_dict_from_nggdpp_xml(self, file_object):
+    def clean_extra_properties(self, extra_properties):
+        collection_keys_to_pop = [
+            'ndc_collection_id',
+            'ndc_collection_last_updated',
+            'ndc_collection_created',
+            'ndc_collection_cached',
+            'ndc_collection_owner_api',
+            'ndc_files'
+        ]
+
+        for key in collection_keys_to_pop:
+            if key in extra_properties:
+                extra_properties.pop(key)
+
+        return extra_properties
+
+    def clean_dict_from_nggdpp_xml(self, file_object, extra_properties=None):
         meta = {
             "file_url": file_object["ndc_file_url"],
             "file_downloaded": datetime.utcnow().isoformat(),
@@ -127,9 +143,10 @@ class Files:
             # Evaluate date field if present
             item.update(self.temporal_processor.introspect_date(item))
 
-            # Add in the file and collection metadata properties
-            for k, v in file_object.items():
-                item.update({k: v})
+            # Add in the extra properties if available
+            if extra_properties is not None and isinstance(extra_properties, dict):
+                for k, v in extra_properties.items():
+                    item.update({k: v})
 
             # Add the date we indexed this data
             item["ndc_date_file_indexed"] = datetime.utcnow().isoformat()
@@ -143,7 +160,7 @@ class Files:
             "recordset": recordset
         }
 
-    def clean_dict_from_csv(self, file_object):
+    def clean_dict_from_csv(self, file_object, extra_properties=None):
         comma_allowed = [
             "title",
             "alternatetitle",
@@ -239,15 +256,18 @@ class Files:
         df.replace({np.nan: None}, inplace=True)
 
         # Add summary metadata
-        meta["accepted_columns"] = list(df.columns)
+        meta["property_names"] = list(df.columns)
         meta["accepted_record_number"] = len(df)
 
         # Add in spatial processing
         recordset = list()
         for item in df.to_dict(orient="records"):
-            for k, v in file_object.items():
-                item.update({k: v})
             recordset.append(self.spatial_processor.introspect_coordinates(item))
+
+            # Add in the extra properties if available
+            if extra_properties is not None and isinstance(extra_properties, dict):
+                for k, v in extra_properties.items():
+                    item.update({k: v})
 
             # Add the date we indexed this data
             item["ndc_date_file_indexed"] = datetime.utcnow().isoformat()
@@ -361,7 +381,7 @@ class Spatial:
 
             feature_list.append(Feature(geometry=g, properties=p))
 
-        return FeatureCollection(feature_list)
+        return geojson_dumps(FeatureCollection(feature_list, crs="EPSG:3857"))
 
     def feature_from_metadata(self, meta_doc):
         p = dict()

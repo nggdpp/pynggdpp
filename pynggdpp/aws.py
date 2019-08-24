@@ -90,19 +90,19 @@ class Search:
                                 "type": "text"
                             },
                             "datasetreferencedate": {
-                                "type": "text"
+                                "type": "date"
                             },
                             "ndc_collection_id": {
-                                "type": "text"
+                                "type": "string"
                             },
                             "ndc_collection_title": {
-                                "type": "text"
+                                "type": "string"
                             },
                             "ndc_collection_abstract": {
                                 "type": "text"
                             },
                             "ndc_collection_owner": {
-                                "type": "text"
+                                "type": "string"
                             },
                             "ndc_collection_link": {
                                 "type": "text"
@@ -147,6 +147,17 @@ class Search:
             }
         }
         return self.es.indices.put_mapping(index=index_name, body=mapping, doc_type=doc_type)
+
+    def query_index(self, index_name, query, clean_results=True):
+        result = self.es.search(index=index_name, body=query)
+
+        if not clean_results:
+            return result
+        else:
+            if result["hits"]["total"] == 0:
+                return None
+            else:
+                return [r["_source"] for r in result["hits"]["hits"]]
 
 
 class Storage:

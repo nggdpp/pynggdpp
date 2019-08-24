@@ -1,5 +1,7 @@
 from datetime import datetime
 import requests
+from sciencebasepy import SbSession
+
 
 class Organizations:
     def __init__(self):
@@ -38,17 +40,14 @@ class Organizations:
 
 class Collections:
     def __init__(self):
-        self.sb_catalog_path = "https://www.sciencebase.gov/catalog/items"
-        self.sb_item_path = "https://www.sciencebase.gov/catalog/item/"
+        self.sb = SbSession()
         self.sb_vocab_path = "https://www.sciencebase.gov/vocab"
+        self.sb_party_root = "https://www.sciencebase.gov/directory/party/"
         self.sb_default_max = "100"
-        self.sb_default_format = "json"
         self.sb_default_props = "title,body,contacts,spatial,files,webLinks,facets,dates,parentId"
+        self.sb_files = Files()
         self.ndc_vocab_id = "5bf3f7bce4b00ce5fb627d57"
         self.ndc_catalog_id = "4f4e4760e4b07f02db47dfb4"
-        self.sb_party_root = "https://www.sciencebase.gov/directory/party/"
-
-        self.sb_files = Files()
 
     def ndc_collection_type_tag(self, tag_name, include_type=True):
         vocab_search_url = f'{self.sb_vocab_path}/' \
@@ -64,6 +63,19 @@ class Collections:
             return None
 
     def ndc_collections(self, query=None):
+        params = {
+            'max': '100',
+            'fields': 'title,body,contacts,spatial,files,webLinks,facets,dates,parentId',
+            'folderId': '4f4e4760e4b07f02db47dfb4',
+            'filter0': "tags={'name': 'ndc_collection', 'scheme': 'https://www.sciencebase.gov/vocab/category/NGGDPP/nggdpp_collection_types'}"
+        }
+
+        sb_collections = list()
+        response = sb.find_items(params)
+        while response and "items" in response:
+            sb_collections.extend(response["items"])
+            response = sb.next(response)
+
         nextLink = f'{self.sb_catalog_path}?' \
                                f'format={self.sb_default_format}&' \
                                f'max={self.sb_default_max}&' \
