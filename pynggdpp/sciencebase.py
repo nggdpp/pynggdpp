@@ -67,49 +67,19 @@ class Collections:
             'max': '100',
             'fields': 'title,body,contacts,spatial,files,webLinks,facets,dates,parentId',
             'folderId': '4f4e4760e4b07f02db47dfb4',
-            'filter0': "tags={'name': 'ndc_collection', 'scheme': 'https://www.sciencebase.gov/vocab/category/NGGDPP/nggdpp_collection_types'}"
+            'filter0': f"tags={self.ndc_collection_type_tag('ndc_collection')}"
         }
 
+        if query is not None:
+            params["q"] = query
+
         sb_collections = list()
-        response = sb.find_items(params)
+        response = self.sb.find_items(params)
         while response and "items" in response:
             sb_collections.extend(response["items"])
-            response = sb.next(response)
+            response = self.sb.next(response)
 
-        nextLink = f'{self.sb_catalog_path}?' \
-                               f'format={self.sb_default_format}&' \
-                               f'max={self.sb_default_max}&' \
-                               f'fields={self.sb_default_props}&' \
-                               f'folderId={self.ndc_catalog_id}&' \
-                               f"filter=tags%3D{self.ndc_collection_type_tag('ndc_collection',False)}"
-
-        if query is not None:
-            nextLink = f"{nextLink}&q={query}"
-
-        collectionItems = list()
-
-        while nextLink is not None:
-            r_ndc_collections = requests.get(nextLink).json()
-
-            if "items" in r_ndc_collections.keys():
-                collectionItems.extend(r_ndc_collections["items"])
-
-            if "nextlink" in r_ndc_collections.keys():
-                nextLink = r_ndc_collections["nextlink"]["url"]
-            else:
-                nextLink = None
-
-        if len(collectionItems) == 0:
-            collectionItems = None
-        else:
-            # For some reason, the ScienceBase API is returning duplicate records.
-            # This step gets unique IDs and then adds the first record for each to the array.
-            unique_collections = list()
-            for unique_id in list(set([i["id"] for i in collectionItems])):
-                unique_collections.append(next(i for i in collectionItems if i["id"] == unique_id))
-            collectionItems = unique_collections
-
-        return collectionItems
+        return sb_collections
 
     def ndc_collection_record(self, collection_id):
         r = requests.get(f"{self.sb_catalog_path}?"
