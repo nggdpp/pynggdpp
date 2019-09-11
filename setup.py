@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(name='pynggdpp',
-      version='0.0.2',
+      version='0.0.3',
       description='Bare bones version of pynggdpp',
       url='http://github.com/nggdpp/pynggdpp',
       author='R. Sky Bristol',
@@ -29,6 +29,7 @@ setup(name='pynggdpp',
             'python-dateutil',
             'pytz',
             'requests',
+            'reverse_geocoder',
             'sciencebasepy',
             'six',
             'soupsieve',

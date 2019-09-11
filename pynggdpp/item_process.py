@@ -13,6 +13,7 @@ from geojson import Feature, Point, FeatureCollection
 from geojson import dumps as geojson_dumps
 from gis_metadata.metadata_parser import get_metadata_parser
 from gis_metadata.utils import get_supported_props
+import reverse_geocoder as rg
 
 from .aws import Connect
 from .aws import Storage
@@ -568,6 +569,40 @@ class General:
 
         context_meta["ndc_date_record_created"] = datetime.utcnow().isoformat()
         return context_meta
+
+
+class Enhancers:
+    def __init__(self):
+        self.description = "Set of enhancement functions for indexing process"
+
+    def locality_info(self, coordinates):
+        locality_info = rg.search((coordinates[1], coordinates[0]))
+        if isinstance(locality_info, list):
+            locality_packet = {
+                "country": locality_info[0]["cc"],
+                "state": locality_info[0]["admin1"],
+                "city": locality_info[0]["name"]
+            }
+            if len(locality_info[0]["admin2"]) > 0:
+                locality_packet["county"] = locality_info[0]["admin2"]
+                locality_packet["county_state"] = f'{locality_info[0]["admin2"]}, {locality_info[0]["admin1"]}'
+            return locality_packet
+        else:
+            return None
+
+    def macrostrat_gmu_info(self, coordinates):
+        ms_gmu_api = "https://macrostrat.org/api/v2/geologic_units/gmus"
+        api = f'{ms_gmu_api}?lat={coordinates[1]}&lng={coordinates[0]}'
+
+        ms_gmus = json.loads(requests.get(
+            api,
+            headers={"Content-type": "application/json"}
+        ).content.decode())
+
+        if len(ms_gmus["success"]["data"]) > 0:
+            return ms_gmus["success"]["data"][0]
+        else:
+            return None
 
 
 class ListStream:
